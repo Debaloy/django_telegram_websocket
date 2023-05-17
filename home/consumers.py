@@ -9,6 +9,8 @@ from telethon import TelegramClient, errors, types
 class TelegramScraper(AsyncWebsocketConsumer):
     room_name = "telegram_consumer"
     room_group_name = "telegram_consumer_group"
+    apiKey = ""
+
     session_file_name = ""
     client = None
     phone = ""
@@ -35,7 +37,8 @@ class TelegramScraper(AsyncWebsocketConsumer):
 
             match event:
                 case "login":
-                    await self.handle_token_login(event, data['apiKey'])
+                    self.apiKey = data["apiKey"]
+                    await self.handle_token_login(event, self.apiKey)
                 
                 case "telegram login":
                     await self.handle_telegram_login(event, data)
@@ -119,6 +122,25 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 if await self.is_group(group) and not await self.is_channel(group):
                     await self.send_group_users(group)
                     print(f"USERS: Data sent for group '{group}'")
+
+        if "latest" == data["status"]:
+            for group in data["group"]:
+                if await self.is_channel(group):
+                    print(f"USERS: Group name '{group}' is a channel")
+                    await self.send_failed_notif(event, f"{group} is a channel name")
+                    await self.close()
+                    break
+
+                if not await self.is_group(group):
+                    print(f"USERS: Group name '{group}' does not exist")
+                    await self.send_failed_notif(event, f"group {group} does not exist")
+                    await self.close()
+                    break
+
+                if await self.is_group(group) and not await self.is_channel(group):
+                    await self.send_success_notif(event, "sending users")
+                    await self.send_group_users(group, True)
+                    print(f"USERS: Data sent for group '{group}'")
     
 
     # ========== RECEIVE UTILITY FUNCTIONS ==========
@@ -152,7 +174,6 @@ class TelegramScraper(AsyncWebsocketConsumer):
             await self.client.sign_in(self.phone, code)
             self.session_created = True
             print("TELEGRAM LOGIN: Code verified. Session Created.")
-            # TODO: LOGIC TO SAVE THE SESSION FILE IN DATABASE
             await self.send_success_notif("telegram login", "logged in successfully")
         except errors.SessionPasswordNeededError:
             self.session_created = False
@@ -160,7 +181,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
             await self.send_failed_notif("telegram login", "invalid code provided")
             await self.close()
 
-    async def send_group_users(self, group_name):
+    async def send_group_users(self, group_name, latest=False):
         group_entity = await self.client.get_entity(group_name)
         async for user in self.client.iter_participants(group_entity):
             if not isinstance(user, types.User) or user is None:
