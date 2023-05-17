@@ -22,7 +22,7 @@ ws://localhost:8000/ws/telegram/
 	"event": "login",
 	"data": {
 		"status": "success",
-        "message": "send phone number"
+        	"message": "send phone number"
 	}
 }
 ```
@@ -32,7 +32,7 @@ ws://localhost:8000/ws/telegram/
 	"event": "login",
 	"data": {
 		"status": "failed",
-        "message": "unauthorized"
+        	"message": "unauthorized"
 	}
 }
 ```
@@ -42,7 +42,7 @@ ws://localhost:8000/ws/telegram/
 	"event": "login",
 	"data": {
 		"status": "success",
-        "message": "Already verified. Send data to 'telegram login' or 'users'."
+        	"message": "Already verified. Send data to 'telegram login' or 'users'."
 	}
 }
 ```
@@ -52,7 +52,7 @@ ws://localhost:8000/ws/telegram/
 	"event": "login",
 	"data": {
 		"status": "success",
-        "message": "session already exists, call 'users'."
+        	"message": "session already exists, call 'users'."
 	}
 }
 ```
@@ -75,7 +75,7 @@ ws://localhost:8000/ws/telegram/
 	"event": "telegram login",
 	"data": {
 		"status": "success",
-        "message": "send code"
+        	"message": "send code"
 	}
 }
 ```
@@ -85,7 +85,7 @@ ws://localhost:8000/ws/telegram/
 	"event": "telegram login",
 	"data": {
 		"status": "failed",
-        "message": "invalid phone number"
+        	"message": "invalid phone number"
 	}
 }
 ```
@@ -95,7 +95,7 @@ ws://localhost:8000/ws/telegram/
 	"event": "telegram login",
 	"data": {
 		"status": "success",
-        "message": "logged in successfully"
+        	"message": "logged in successfully"
 	}
 }
 ```
@@ -105,7 +105,7 @@ ws://localhost:8000/ws/telegram/
 	"event": "telegram login",
 	"data": {
 		"status": "failed",
-        "message": "invalid code provided"
+        	"message": "invalid code provided"
 	}
 }
 ```
@@ -115,7 +115,7 @@ ws://localhost:8000/ws/telegram/
 	"event": "telegram login",
 	"data": {
 		"status": "failed",
-        "message": "verify your api key first"
+        	"message": "verify your api key first"
 	}
 }
 ```
@@ -125,7 +125,7 @@ ws://localhost:8000/ws/telegram/
 	"event": "telegram login",
 	"data": {
 		"status": "success",
-        "message": "session alreay exists, call 'users'"
+        	"message": "session alreay exists, call 'users'"
 	}
 }
 ```
