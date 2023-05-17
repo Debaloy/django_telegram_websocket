@@ -50,6 +50,9 @@ class TelegramScraper(AsyncWebsocketConsumer):
             elif event == "chats":
                 await self.handle_chats_scraping(event, data)
 
+            elif event == "logout":
+                await self.handle_logout(event, data)
+
             else:
                 await self.send_failed_notif(event, "unknown event")
             
@@ -74,18 +77,12 @@ class TelegramScraper(AsyncWebsocketConsumer):
         if self.verified:
             await self.send_success_notif(event, "Already verified. Send data to 'telegram login' or 'users'.")
 
-        if self.verify_token(apiKey):
+        if await self.verify_token(apiKey):
             print("TOKEN LOGIN: Verified User")
-            file_offset = 8
-            self.session_file_name = apiKey[:file_offset] + apiKey[-file_offset:]
-
-            if not os.path.isfile(f"self.session_file_name.session"):
-                await self.send_success_notif(event, "send phone number")
+            if self.session_created:
+                await self.send_success_notif(event, "successfully logged in")
             else:
-                self.client = TelegramClient(self.session_file_name, self.api_id, self.api_hash)
-                await self.client.start()
-                self.session_created = True
-                await self.send_success_notif(event, "session already exists, call 'users'")
+                await self.send_success_notif(event, "send phone number")
         else:
             print("TOKEN LOGIN: Unauthorized User")
             await self.send_failed_notif(event, "unauthorized")
@@ -97,7 +94,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
             await self.close()
         else:
             if self.session_created:
-                await self.send_success_notif(event, "session alreay exists, call 'users'")
+                await self.send_success_notif(event, "successfully logged")
             else:
                 if "phone" in data:
                     print("TELEGRAM LOGIN: Initiating sesison...")
@@ -114,24 +111,16 @@ class TelegramScraper(AsyncWebsocketConsumer):
             await self.close()
 
         for group in data["group"]:
-            if await self.is_channel(group):
-                print(f"USERS: Group name '{group}' is a channel")
-                await self.send_failed_notif(event, f"{group} is a channel name")
-                await self.client.disconnect()
-                await self.close()
-                break
-
-            if not await self.is_group(group):
+            if not await self.dialog_exists(group):
                 print(f"USERS: Group name '{group}' does not exist")
-                await self.send_failed_notif(event, f"group {group} does not exist")
+                await self.send_failed_notif(event, "invalid request")
                 await self.client.disconnect()
                 await self.close()
                 break
 
-            if await self.is_group(group) and not await self.is_channel(group):
-                await self.send_success_notif(event, "sending users")
-                await self.send_group_users(group)
-                print(f"USERS: Data sent for group '{group}'")
+            await self.send_success_notif(event, "sending users")
+            await self.send_group_users(group)
+            print(f"USERS: Data sent for group '{group}'")
 
     async def handle_chats_scraping(self, event, data):
         if not self.session_created:
@@ -146,7 +135,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
                     self.close()
                     break
 
-                if not (await self.is_group(group["name"]) or await self.is_channel(group["name"])):
+                if not await self.dialog_exists(group["name"]):
                     self.send_failed_notif(event, "Invalid group/channel name")
                     print(f"CHATS: '{group['name']}' is an invalid group/channel name")
                     self.close()
@@ -164,7 +153,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
                     self.close()
                     break
 
-                if not (await self.is_group(group["name"]) or await self.is_channel(group["name"])):
+                if not await self.dialog_exists(group["name"]):
                     self.send_failed_notif(event, "Invalid group/channel name")
                     print(f"CHATS: '{group['name']}' is an invalid group/channel name")
                     self.close()
@@ -182,9 +171,9 @@ class TelegramScraper(AsyncWebsocketConsumer):
             
 
     # ========== RECEIVE UTILITY FUNCTIONS ==========
-    def verify_token(self, apiKey):
+    async def verify_token(self, apiKey):
         try:
-            sync_to_async(User.objects.get)(api_key=apiKey)
+            await sync_to_async(User.objects.using('userdb').get)(api_key=apiKey)
             self.verified = True
             return True
         except User.DoesNotExist:
@@ -192,7 +181,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
             return False
 
     async def initiate_session(self, phone):
-        self.client = TelegramClient(self.session_file_name, self.api_id, self.api_hash)
+        self.client = TelegramClient(phone[1:], self.api_id, self.api_hash)
         try:
             await self.client.connect()
             if not await self.client.is_user_authorized():
@@ -217,8 +206,8 @@ class TelegramScraper(AsyncWebsocketConsumer):
 
             # INSERT THE API KEY IN TELEGRAMDB
             defaults = {
-                'last_user_id_sent': '',
-                'last_msg_id_sent': ''
+                'group_name': '',
+                'message_id': ''
             }
 
             get_or_create = sync_to_async(Telegram.objects.using('telegramdb').get_or_create)
@@ -238,6 +227,20 @@ class TelegramScraper(AsyncWebsocketConsumer):
 
     async def send_group_users(self, group_name):
         group_entity = await self.client.get_entity(group_name)
+
+        api_calls = await sync_to_async(User.objects.using('userdb').get)(api_key=self.apiKey)
+        api_calls = api_calls.api_calls
+
+        update_or_create = sync_to_async(User.objects.using('userdb').update_or_create)
+        entry, created = await update_or_create(api_key=self.apiKey, defaults={'api_calls': api_calls + 1})
+        
+        if created:
+            # The record was created
+            print("USERS: API Incremented.")
+        else:
+            # The record already exists
+            print("USERS: API Incremented (UPDATED).")
+
         async for user in self.client.iter_participants(group_entity):
             if not isinstance(user, types.User) or user is None:
                 continue
@@ -248,14 +251,21 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 "user": user_dict
             })
 
-            # try:
-            #     filtered = await sync_to_async(Telegram.objects.using('telegramdb').filter)(api_key=self.apiKey)
-            #     sync_to_async(filtered.update)(last_user_id_sent=user_dict["id"])
-            # except Exception as e:
-            #     print(f"USERS: Exception: {e}")
-
     async def send_group_chats(self, group_name, min_id=0):
         group_entity = await self.client.get_entity(group_name)
+
+        api_calls = await sync_to_async(User.objects.using('userdb').get)(api_key=self.apiKey)
+        api_calls = api_calls.api_calls
+
+        update_or_create = sync_to_async(User.objects.using('userdb').update_or_create)
+        entry, created = await update_or_create(api_key=self.apiKey, defaults={'api_calls': api_calls + 1})
+        
+        if created:
+            # The record was created
+            print("CHATS: API Incremented.")
+        else:
+            # The record already exists
+            print("CHATS: API Incremented (UPDATED).")
 
         async for message in self.client.iter_messages(entity=group_entity, min_id=min_id):
             if not isinstance(message, types.Message) or message is None:
@@ -267,20 +277,6 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 "group": group_name,
                 "chat": message_dict
             })
-
-            # telegram_user = await sync_to_async(Telegram.objects.using)('telegramdb')
-            # telegram_user = await sync_to_async(telegram_user.filter)(api_key=self.apiKey, group_name=group_name)
-            
-            # if telegram_user:
-            #     await sync_to_async(telegram_user.update)(message_id=message_dict["id"])
-            # else:
-            #     # Create a new record
-            #     telegram_user = await sync_to_async(Telegram)(
-            #         api_key=self.apiKey,
-            #         group_name=group_name,
-            #         message_id=message_dict["id"]
-            #     )
-            #     await sync_to_async(telegram_user.save)(using='telegramdb')
 
             update_or_create = sync_to_async(Telegram.objects.using('telegramdb').update_or_create)
             entry, created = await update_or_create(api_key=self.apiKey, group_name=group_name, defaults={'message_id': message_dict["id"]})
@@ -515,19 +511,24 @@ class TelegramScraper(AsyncWebsocketConsumer):
             }
         }))
 
-    async def is_channel(self, group):
+
+    async def dialog_exists(self, group):
         try:
             group_entity = await self.client.get_entity(group)
-            if hasattr(group_entity, 'channel') and group_entity.channel:
-                return True
-            else:
-                return False
+            async for dialog in self.client.iter_dialogs():
+                if dialog.name == group_entity.title:
+                    return True
+            return False
         except (ValueError, AttributeError):
             return False
-
+    
     async def is_group(self, group):
         try:
             group_entity = await self.client.get_entity(group)
             return True
+            # if hasattr(group_entity, 'group') and group_entity.group:
+            #     return True
+            # else:
+            #     return False
         except (ValueError, AttributeError):
             return False
