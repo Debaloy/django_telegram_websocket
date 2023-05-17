@@ -1,5 +1,7 @@
 from channels.generic.websocket import AsyncWebsocketConsumer
-from channels.exceptions import StopConsumer
+from telegram.models import Telegram
+from user.models import User
+from asgiref.sync import sync_to_async
 
 import json
 import os.path
@@ -35,20 +37,22 @@ class TelegramScraper(AsyncWebsocketConsumer):
             event = json_data["event"]
             data = json_data["data"]
 
-            match event:
-                case "login":
-                    self.apiKey = data["apiKey"]
-                    await self.handle_token_login(event, self.apiKey)
+            if event == "login":
+                self.apiKey = data["apiKey"]
+                await self.handle_token_login(event, self.apiKey)
                 
-                case "telegram login":
-                    await self.handle_telegram_login(event, data)
+            elif event == "telegram login":
+                await self.handle_telegram_login(event, data)
 
-                case "users":
-                    await self.handle_users_scraping(event, data)
+            elif event == "users":
+                await self.handle_users_scraping(event, data)
 
-                case _:
-                    await self.send_failed_notif(event, "unknown event")
-        
+            elif event == "chats":
+                await self.handle_chats_scraping(event, data)
+
+            else:
+                await self.send_failed_notif(event, "unknown event")
+            
         except KeyError as e:
             await self.send_failed_notif("JSON data error", f"Missing key: {e}")
             await self.close()
@@ -57,6 +61,10 @@ class TelegramScraper(AsyncWebsocketConsumer):
             await self.close()
     
     async def disconnect(self, close_code):
+        try:
+            self.client.disconnect()
+        except Exception as e:
+            print("CLIENT COULD NOT BE DISCONNECTED OR WAS NEVER CREATED")
         print(f"DISCONNECTED : Close code {close_code}")
 
     
@@ -68,10 +76,10 @@ class TelegramScraper(AsyncWebsocketConsumer):
 
         if self.verify_token(apiKey):
             print("TOKEN LOGIN: Verified User")
-            file_offset = 5
+            file_offset = 8
             self.session_file_name = apiKey[:file_offset] + apiKey[-file_offset:]
 
-            if not os.path.isfile(self.session_file_name + '.session'):
+            if not os.path.isfile(f"self.session_file_name.session"):
                 await self.send_success_notif(event, "send phone number")
             else:
                 self.client = TelegramClient(self.session_file_name, self.api_id, self.api_hash)
@@ -101,62 +109,92 @@ class TelegramScraper(AsyncWebsocketConsumer):
                     await self.validate_code(data['code'])
 
     async def handle_users_scraping(self, event, data):
-        if not self.verified or not self.session_created:
+        if not self.session_created:
             await self.send_failed_notif(event, "login required")
             await self.close()
 
-        if "" == data["status"]:
+        for group in data["group"]:
+            if await self.is_channel(group):
+                print(f"USERS: Group name '{group}' is a channel")
+                await self.send_failed_notif(event, f"{group} is a channel name")
+                await self.client.disconnect()
+                await self.close()
+                break
+
+            if not await self.is_group(group):
+                print(f"USERS: Group name '{group}' does not exist")
+                await self.send_failed_notif(event, f"group {group} does not exist")
+                await self.client.disconnect()
+                await self.close()
+                break
+
+            if await self.is_group(group) and not await self.is_channel(group):
+                await self.send_success_notif(event, "sending users")
+                await self.send_group_users(group)
+                print(f"USERS: Data sent for group '{group}'")
+
+    async def handle_chats_scraping(self, event, data):
+        if not self.session_created:
+            await self.send_failed_notif(event, "login required")
+            await self.close()
+
+        if data["status"] == "":
             for group in data["group"]:
-                if await self.is_channel(group):
-                    print(f"USERS: Group name '{group}' is a channel")
-                    await self.send_failed_notif(event, f"{group} is a channel name")
-                    await self.close()
+                if group["name"] == "":
+                    self.send_failed_notif(event, "Group name must be provided")
+                    print("CHATS: Group name not provided")
+                    self.close()
                     break
 
-                if not await self.is_group(group):
-                    print(f"USERS: Group name '{group}' does not exist")
-                    await self.send_failed_notif(event, f"group {group} does not exist")
-                    await self.close()
+                if not (await self.is_group(group["name"]) or await self.is_channel(group["name"])):
+                    self.send_failed_notif(event, "Invalid group/channel name")
+                    print(f"CHATS: '{group['name']}' is an invalid group/channel name")
+                    self.close()
                     break
 
-                if await self.is_group(group) and not await self.is_channel(group):
-                    await self.send_group_users(group)
-                    print(f"USERS: Data sent for group '{group}'")
+                await self.send_success_notif(event, f"Sending messages for {group['name']}")
+                await self.send_group_chats(group["name"])
+                print(f"CHATS: Data sent for {group['name']}")
 
-        if "latest" == data["status"]:
+        if data["status"] == "latest":
             for group in data["group"]:
-                if await self.is_channel(group):
-                    print(f"USERS: Group name '{group}' is a channel")
-                    await self.send_failed_notif(event, f"{group} is a channel name")
-                    await self.close()
+                if group["name"] == "":
+                    self.send_failed_notif(event, "Group name must be provided")
+                    print("CHATS: Group name not provided")
+                    self.close()
                     break
 
-                if not await self.is_group(group):
-                    print(f"USERS: Group name '{group}' does not exist")
-                    await self.send_failed_notif(event, f"group {group} does not exist")
-                    await self.close()
+                if not (await self.is_group(group["name"]) or await self.is_channel(group["name"])):
+                    self.send_failed_notif(event, "Invalid group/channel name")
+                    print(f"CHATS: '{group['name']}' is an invalid group/channel name")
+                    self.close()
                     break
 
-                if await self.is_group(group) and not await self.is_channel(group):
-                    await self.send_success_notif(event, "sending users")
-                    await self.send_group_users(group, True)
-                    print(f"USERS: Data sent for group '{group}'")
-    
+                # get from db
+                telegram_user = Telegram.objects.using('telegramdb').filter(api_key=self.apiKey, group_name=group["name"])
+                message_id = telegram_user.message_id if telegram_user.message_id else 0
+
+                print(message_id)
+
+                await self.send_success_notif(event, f"Sending messages for {group['name']}")
+                await self.send_group_chats(group["name"], min_id=message_id)
+                print(f"CHATS: Data sent for {group['name']}")
+            
 
     # ========== RECEIVE UTILITY FUNCTIONS ==========
     def verify_token(self, apiKey):
-        # Logic to connect to database and verify the apiKey
-        if "alkflknsdnfsjkn.ksalfjksdhksdsfdsdfsdf.lkszmlsknmskjdns" in apiKey:
+        try:
+            sync_to_async(User.objects.get)(api_key=apiKey)
             self.verified = True
             return True
-
-        self.verified = False
-        return False
+        except User.DoesNotExist:
+            self.verified = False
+            return False
 
     async def initiate_session(self, phone):
         self.client = TelegramClient(self.session_file_name, self.api_id, self.api_hash)
         try:
-            connect_result = await self.client.connect()
+            await self.client.connect()
             if not await self.client.is_user_authorized():
                 await self.client.send_code_request(phone)
                 print("TELEGRAM LOGIN: Code sent...")
@@ -164,6 +202,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
             else:
                 print("TELEGRAM LOGIN: User session available")
                 await self.send_success_notif("telegram login", "logged in")
+                self.session_created = True
         except errors.PhoneCodeInvalidError:
             print("TELEGRAM LOGIN: Invalid phone number provided.")
             await self.send_failed_notif("telegram login", "invalid phone number")
@@ -175,34 +214,109 @@ class TelegramScraper(AsyncWebsocketConsumer):
             self.session_created = True
             print("TELEGRAM LOGIN: Code verified. Session Created.")
             await self.send_success_notif("telegram login", "logged in successfully")
+
+            # INSERT THE API KEY IN TELEGRAMDB
+            defaults = {
+                'last_user_id_sent': '',
+                'last_msg_id_sent': ''
+            }
+
+            get_or_create = sync_to_async(Telegram.objects.using('telegramdb').get_or_create)
+            entry, created = await get_or_create(api_key=self.apiKey, defaults=defaults)
+            
+            if created:
+                # The record was created
+                print("TELEGRAM LOGIN: Record was created.")
+            else:
+                # The record already exists
+                print("TELEGRAM LOGIN: Record already exists.")
         except errors.SessionPasswordNeededError:
             self.session_created = False
             print("TELEGRAM LOGIN: Invalid code provided...")
             await self.send_failed_notif("telegram login", "invalid code provided")
             await self.close()
 
-    async def send_group_users(self, group_name, latest=False):
+    async def send_group_users(self, group_name):
         group_entity = await self.client.get_entity(group_name)
         async for user in self.client.iter_participants(group_entity):
             if not isinstance(user, types.User) or user is None:
                 continue
             user_dict = await self.get_user_properties(user)
+            
             await self.send_success_notif("users", {
                 "group": group_name,
                 "user": user_dict
             })
 
+            # try:
+            #     filtered = await sync_to_async(Telegram.objects.using('telegramdb').filter)(api_key=self.apiKey)
+            #     sync_to_async(filtered.update)(last_user_id_sent=user_dict["id"])
+            # except Exception as e:
+            #     print(f"USERS: Exception: {e}")
+
+    async def send_group_chats(self, group_name, min_id=0):
+        group_entity = await self.client.get_entity(group_name)
+
+        async for message in self.client.iter_messages(entity=group_entity, min_id=min_id):
+            if not isinstance(message, types.Message) or message is None:
+                continue
+            
+            message_dict = await self.get_message_properties(message)
+            
+            await self.send_success_notif("chats", {
+                "group": group_name,
+                "chat": message_dict
+            })
+
+            # telegram_user = await sync_to_async(Telegram.objects.using)('telegramdb')
+            # telegram_user = await sync_to_async(telegram_user.filter)(api_key=self.apiKey, group_name=group_name)
+            
+            # if telegram_user:
+            #     await sync_to_async(telegram_user.update)(message_id=message_dict["id"])
+            # else:
+            #     # Create a new record
+            #     telegram_user = await sync_to_async(Telegram)(
+            #         api_key=self.apiKey,
+            #         group_name=group_name,
+            #         message_id=message_dict["id"]
+            #     )
+            #     await sync_to_async(telegram_user.save)(using='telegramdb')
+
+            update_or_create = sync_to_async(Telegram.objects.using('telegramdb').update_or_create)
+            entry, created = await update_or_create(api_key=self.apiKey, group_name=group_name, defaults={'message_id': message_dict["id"]})
+            
+            if created:
+                # The record was created
+                print("CHATS: Record was created.")
+            else:
+                # The record already exists
+                print("CHATS: Record already exists. UPDATED.")
+
+
 
     # ========== GROUP USERS UTILITY FUNCTIONS ==========
+    def get_peer_dict(self, peer):
+        if isinstance(peer, types.PeerUser):
+            return {"_": "peerUser", "user_id": peer.user_id}
+        elif isinstance(peer, types.PeerChat):
+            return {"_": "peerChat", "chat_id": peer.chat_id}
+        elif isinstance(peer, types.PeerChannel):
+            return {"_": "peerChannel", "channel_id": peer.channel_id}
+        else:
+            return None
+
+    def get_entity_dict(self, entity):
+        return entity.to_dict()
+    
     def convert_bytes(self, obj, encoding="utf-8"):
         if isinstance(obj, bytes):
             return obj.decode('iso-8859-1')
         elif isinstance(obj, datetime):
             return obj.isoformat()
         elif isinstance(obj, list):
-            return [convert_bytes(item) for item in obj]
+            return [self.convert_bytes(item) for item in obj]
         elif isinstance(obj, dict):
-            return {convert_bytes(key): convert_bytes(value) for key, value in obj.items()}
+            return {self.convert_bytes(key): self.convert_bytes(value) for key, value in obj.items()}
         else:
             return obj
 
@@ -228,6 +342,76 @@ class TelegramScraper(AsyncWebsocketConsumer):
         else:
             return None
 
+    def get_reply_markup_dict(self, reply_markup):
+        if reply_markup is None:
+            return None
+        
+        # Convert bytes to strings in the reply_markup
+        reply_markup_dict = reply_markup.to_dict()
+        reply_markup_dict = self.convert_bytes(reply_markup_dict)
+
+        return reply_markup_dict
+
+    def get_media_dict(self, media):
+        if media is None:
+            return None
+        
+        media = media.to_dict()
+        media = self.convert_bytes(media, "iso-8859-1")
+
+        return media
+
+    def get_replies_dict(self, replies):
+        return (
+            {
+                "replies": replies.replies,
+                "replies_pts": replies.replies_pts,
+                "comments": replies.comments,
+                "recent_repliers": [r.to_dict() for r in replies.recent_repliers] if replies.recent_repliers else [],
+                "channel_id": replies.channel_id,
+                "max_id": replies.max_id,
+                "read_max_id": replies.read_max_id
+            }
+            if replies
+            else None
+        )
+
+    def get_restriction_reason_list(self, restriction_reason):
+        if restriction_reason is None:
+            return None
+        return [reason.to_dict() for reason in restriction_reason]
+
+    def get_forwards_dict(self, forwards):
+        if not isinstance(forwards, types.MessageFwdHeader) or forwards is None:
+            return None
+        
+        return {
+            "from_id": forwards.from_id if forwards.from_id else None,
+            "from_name": forwards.from_name if forwards.from_name else None,
+            "date": forwards.date.isoformat() if forwards.date else None,
+            "channel_id": forwards.channel_id if forwards.channel_id else None,
+            "channel_post": forwards.channel_post if forwards.channel_post else None,
+            "post_author": forwards.post_author if forwards.post_author else None,
+        }
+
+    def get_fwd_from_dict(self, fwd):
+        if not fwd:
+            return None
+
+        return {
+            'from_id': self.get_peer_dict(fwd.from_id) if fwd.from_id else None,
+            'date': fwd.date.isoformat() if fwd.date else None,
+            'saved_from_peer': {
+                'user_id': self.get_peer_dict(fwd.saved_from_peer) if fwd.saved_from_peer else None,
+                'channel_id': fwd.saved_from_peer.channel_id if fwd.saved_from_peer.channel_id else None
+            } if fwd.saved_from_peer else None,
+            'saved_from_msg_id': fwd.saved_from_msg_id if fwd.saved_from_msg_id else None,
+        }
+
+    async def get_user_by_id(self, client, user_id):
+        user_entity = await client.get_entity(types.PeerUser(user_id))
+        return user_entity
+    
     async def get_user_properties(self, user):
         return {
             "id": user.id if user.id else None,
@@ -268,6 +452,47 @@ class TelegramScraper(AsyncWebsocketConsumer):
             "usernames": json.dumps(user.usernames) if user.usernames else json.dumps([]),
             "restriction_reason": [reason.to_dict() for reason in user.restriction_reason] if user.restriction_reason else None,
             "access_hash": user.access_hash,
+        }
+
+    async def get_message_properties(self, message):        
+        fromId = self.get_peer_dict(message.from_id) if message.from_id else None
+        if fromId is not None and "user_id" in fromId:
+            fromId = await self.get_user_by_id(self.client, fromId["user_id"])
+            fromId = await self.get_user_properties(fromId)
+
+        return {
+            "id": message.id if message.id else None,
+            "peer_id": self.get_peer_dict(message.peer_id) if message.peer_id else None,
+            "date": message.date.isoformat() if message.date else None,
+            "edit_date": message.edit_date.isoformat() if message.edit_date else None,
+            "message": message.message if message.message else None,
+
+            "out": message.out,
+            "mentioned": message.mentioned,
+            "media_unread": message.media_unread,
+            "silent": message.silent,
+            "post": message.post,
+            "from_scheduled": message.from_scheduled,
+            "legacy": message.legacy,
+            "edit_hide": message.edit_hide,
+            "pinned": message.pinned,
+            "noforwards": message.noforwards,
+
+            "from_id": fromId,
+            "fwd_from": self.get_fwd_from_dict(message.fwd_from),
+            "via_bot_id": message.via_bot_id.to_dict() if message.via_bot_id else None,
+            "reply_to": message.reply_to.to_dict() if message.reply_to else None,
+            "entities": [self.get_entity_dict(entity) for entity in message.entities or []],
+            "reply_markup": self.get_reply_markup_dict(message.reply_markup) if message.reply_markup else None,
+            "media": self.get_media_dict(message.media) if message.media else None,
+            "post_author": self.get_peer_dict(message.post_author),
+            "views": message.views if message.views is not None else None,
+            "forwards": self.get_forwards_dict(message.forwards) if message.forwards else None,
+            "replies": self.get_replies_dict(message.replies),
+            "grouped_id": message.grouped_id if message.grouped_id else None,
+            "reactions": message.reactions.to_dict() if message.reactions else None,
+            "restriction_reason": [reason.to_dict() for reason in message.restriction_reason] if message.restriction_reason else None,
+            "ttl_period": message.ttl_period if message.ttl_period is not None and message.ttl_period != 0 else None
         }
 
 

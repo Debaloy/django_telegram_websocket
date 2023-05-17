@@ -12,6 +12,7 @@ import os
 from django.core.asgi import get_asgi_application
 from channels.routing import ProtocolTypeRouter, URLRouter
 from django.urls import path
+from django.contrib import admin
 
 from home.consumers import *
 
@@ -24,5 +25,7 @@ ws_patterns = [
 ]
 
 application = ProtocolTypeRouter({
-    'websocket' : URLRouter(ws_patterns)
+    'http': get_asgi_application(),
+    'websocket': URLRouter(ws_patterns),
+    'django': admin.site,
 })
