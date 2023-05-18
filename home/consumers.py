@@ -4,7 +4,6 @@ from user.models import User
 from asgiref.sync import sync_to_async
 
 import json
-import os.path
 from datetime import datetime
 from telethon import TelegramClient, errors, types
 
@@ -18,6 +17,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
     phone = ""
     verified = False    # flag to check if the user sent the correct apiKey
     session_created = False # whether session was created successfully or not or if it exists
+    logout = False # whether the user requested to terminate the session or not
 
     api_hash = "e1cf9289e44fa9ec964d4e110dff729e"
     api_id = "26122974"
@@ -66,8 +66,9 @@ class TelegramScraper(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         try:
             self.client.disconnect()
+            self.close()
         except Exception as e:
-            print("CLIENT COULD NOT BE DISCONNECTED OR WAS NEVER CREATED")
+            print("CLIENT COULD NOT BE DISCONNECTED OR CLIENT SESSION WAS NEVER CREATED")
         print(f"DISCONNECTED : Close code {close_code}")
 
     
@@ -118,6 +119,10 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 await self.close()
                 break
 
+            if self.logout:
+                return
+
+            print(f"USERS: Sending users from {group}")
             await self.send_success_notif(event, "sending users")
             await self.send_group_users(group)
             print(f"USERS: Data sent for group '{group}'")
@@ -141,6 +146,10 @@ class TelegramScraper(AsyncWebsocketConsumer):
                     self.close()
                     break
 
+                if self.logout:
+                    return
+
+                print(f"CHATS: Sending users from {group}")
                 await self.send_success_notif(event, f"Sending messages for {group['name']}")
                 await self.send_group_chats(group["name"])
                 print(f"CHATS: Data sent for {group['name']}")
@@ -159,16 +168,36 @@ class TelegramScraper(AsyncWebsocketConsumer):
                     self.close()
                     break
 
+                if self.logout:
+                    return
+
                 # get from db
                 telegram_user = Telegram.objects.using('telegramdb').filter(api_key=self.apiKey, group_name=group["name"])
                 message_id = telegram_user.message_id if telegram_user.message_id else 0
 
-                print(message_id)
-
+                print(f"CHATS: Sending users from {group}")
                 await self.send_success_notif(event, f"Sending messages for {group['name']}")
                 await self.send_group_chats(group["name"], min_id=message_id)
                 print(f"CHATS: Data sent for {group['name']}")
             
+    async def handle_logout(self, data):
+        if data["status"] == "disconnect":
+            if not (self.verified or self.session_created):
+                await self.send_failed_notif("logout", "unauthorized")
+                return
+                
+            self.logout = True
+            self.verified = False
+            self.session_created = False
+            self.client.disconnect()
+            await self.send_success_notif("logout", "disconnected")
+            await self.close()
+            print("LOGOUT: Successfully logged out")
+        else:
+            self.logout = False
+            await self.send_failed_notif("logout", "invalid logout status")
+            print("LOGOUT: Invalid logout status")
+
 
     # ========== RECEIVE UTILITY FUNCTIONS ==========
     async def verify_token(self, apiKey):
@@ -181,6 +210,9 @@ class TelegramScraper(AsyncWebsocketConsumer):
             return False
 
     async def initiate_session(self, phone):
+        if self.logout:
+            return
+        
         self.client = TelegramClient(phone[1:], self.api_id, self.api_hash)
         try:
             await self.client.connect()
@@ -198,6 +230,9 @@ class TelegramScraper(AsyncWebsocketConsumer):
             await self.close()
 
     async def validate_code(self, code):
+        if self.logout:
+            return
+        
         try:
             await self.client.sign_in(self.phone, code)
             self.session_created = True
@@ -236,14 +271,18 @@ class TelegramScraper(AsyncWebsocketConsumer):
         
         if created:
             # The record was created
-            print("USERS: API Incremented.")
+            pass
         else:
             # The record already exists
-            print("USERS: API Incremented (UPDATED).")
+            pass
 
         async for user in self.client.iter_participants(group_entity):
             if not isinstance(user, types.User) or user is None:
                 continue
+
+            if self.logout:
+                return
+
             user_dict = await self.get_user_properties(user)
             
             await self.send_success_notif("users", {
@@ -262,14 +301,17 @@ class TelegramScraper(AsyncWebsocketConsumer):
         
         if created:
             # The record was created
-            print("CHATS: API Incremented.")
+            pass
         else:
             # The record already exists
-            print("CHATS: API Incremented (UPDATED).")
+            pass
 
         async for message in self.client.iter_messages(entity=group_entity, min_id=min_id):
             if not isinstance(message, types.Message) or message is None:
                 continue
+            
+            if self.logout:
+                return
             
             message_dict = await self.get_message_properties(message)
             
@@ -283,10 +325,10 @@ class TelegramScraper(AsyncWebsocketConsumer):
             
             if created:
                 # The record was created
-                print("CHATS: Record was created.")
+                pass
             else:
                 # The record already exists
-                print("CHATS: Record already exists. UPDATED.")
+                pass
 
 
 
