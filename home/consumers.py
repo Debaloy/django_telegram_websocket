@@ -2,7 +2,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from telegram.models import Telegram
 from user.models import User
 from asgiref.sync import sync_to_async
-
+import time
 import json
 from datetime import datetime
 from telethon import TelegramClient, errors, types
@@ -36,7 +36,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
             json_data = json.loads(text_data)
             event = json_data["event"]
             data = json_data["data"]
-
+  
             if event == "login":
                 self.apiKey = data["apiKey"]
                 await self.handle_token_login(event, self.apiKey)
@@ -63,8 +63,10 @@ class TelegramScraper(AsyncWebsocketConsumer):
             await self.send_failed_notif("JSON parsing error", f"Error: {e}")
             await self.close()
     
-    async def disconnect(self, close_code):
+    async def websocket_disconnect(self, close_code):
+        print("disconnected")
         try:
+            self.logout = True
             self.client.disconnect()
             self.close()
         except Exception as e:
@@ -87,6 +89,8 @@ class TelegramScraper(AsyncWebsocketConsumer):
         else:
             print("TOKEN LOGIN: Unauthorized User")
             await self.send_failed_notif(event, "unauthorized")
+            await self.close()
+            
 
     async def handle_telegram_login(self, event, data):
         print("TELEGRAM LOGIN: Creating session...")
@@ -174,6 +178,8 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 # get from db
                 telegram_user = Telegram.objects.using('telegramdb').filter(api_key=self.apiKey, group_name=group["name"])
                 message_id = telegram_user.message_id if telegram_user.message_id else 0
+                print("Telegram User message id : ",telegram_user.message_id)
+                print("Handler Min Id : ",message_id)
 
                 print(f"CHATS: Sending users from {group}")
                 await self.send_success_notif(event, f"Sending messages for {group['name']}")
@@ -275,7 +281,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
         else:
             # The record already exists
             pass
-
+        count = 0
         async for user in self.client.iter_participants(group_entity):
             if not isinstance(user, types.User) or user is None:
                 continue
@@ -289,6 +295,8 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 "group": group_name,
                 "user": user_dict
             })
+            count += 1
+        print("COUNT : ",count)
 
     async def send_group_chats(self, group_name, min_id=0):
         group_entity = await self.client.get_entity(group_name)
@@ -305,21 +313,23 @@ class TelegramScraper(AsyncWebsocketConsumer):
         else:
             # The record already exists
             pass
-
-        async for message in self.client.iter_messages(entity=group_entity, min_id=min_id):
+        count = 0
+        print("Min ID : ",min_id)
+        async for message in self.client.iter_messages(entity=group_entity, min_id=min_id, reverse=True):
             if not isinstance(message, types.Message) or message is None:
                 continue
             
             if self.logout:
                 return
-            
+  
+            time.sleep(10)
             message_dict = await self.get_message_properties(message)
-            
+            print("Message ID : ",message_dict["id"])
             await self.send_success_notif("chats", {
                 "group": group_name,
                 "chat": message_dict
             })
-
+            count += 1
             update_or_create = sync_to_async(Telegram.objects.using('telegramdb').update_or_create)
             entry, created = await update_or_create(api_key=self.apiKey, group_name=group_name, defaults={'message_id': message_dict["id"]})
             
@@ -329,7 +339,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
             else:
                 # The record already exists
                 pass
-
+        print("Chats : ",count)
 
 
     # ========== GROUP USERS UTILITY FUNCTIONS ==========
