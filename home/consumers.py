@@ -1,3 +1,4 @@
+import asyncio
 from channels.generic.websocket import AsyncWebsocketConsumer
 from telegram.models import Telegram
 from user.models import User
@@ -6,6 +7,8 @@ import time
 import json
 from datetime import datetime
 from telethon import TelegramClient, errors, types
+
+connected_clients = []
 
 class TelegramScraper(AsyncWebsocketConsumer):
     room_name = "telegram_consumer"
@@ -22,14 +25,27 @@ class TelegramScraper(AsyncWebsocketConsumer):
     api_hash = "e1cf9289e44fa9ec964d4e110dff729e"
     api_id = "26122974"
 
-    async def connect(self):
+    async def websocket_connect(self, event):
+        # Add client to the list of connected clients
         await(self.channel_layer.group_add)(
             self.room_name, self.room_group_name
         )
         await self.accept()
+
+        connected_clients.append(self.channel_name)
+        print(connected_clients)
         await self.send(text_data=json.dumps({
-            "status": "connected"
+            'status': 'connected'
         }))
+
+    # async def connect(self):
+    #     await(self.channel_layer.group_add)(
+    #         self.room_name, self.room_group_name
+    #     )
+    #     await self.accept()
+    #     await self.send(text_data=json.dumps({
+    #         "status": "connected"
+    #     }))
     
     async def receive(self, text_data):
         try:
@@ -62,15 +78,26 @@ class TelegramScraper(AsyncWebsocketConsumer):
         except json.JSONDecodeError as e:
             await self.send_failed_notif("JSON parsing error", f"Error: {e}")
             await self.close()
-    
-    async def websocket_disconnect(self, close_code):
-        print("disconnected")
-        try:
-            self.logout = True
-            self.client.disconnect()
+
+    async def websocket_disconnect(self, event):
+        print("disconnected websocket")
+        # Remove client from the list of connected clients
+        connected_clients.remove(self.channel_name)
+        print(connected_clients)
+        # If no clients are connected, stop the consumer after 10 seconds
+        if not connected_clients:
+            if self.session_created:
+                self.client.disconnect()
             self.close()
-        except Exception as e:
-            print("CLIENT COULD NOT BE DISCONNECTED OR CLIENT SESSION WAS NEVER CREATED")
+        await super().websocket_disconnect(event)
+    
+    async def disconnect(self, close_code):
+        # try:
+        #     if self.session_created:
+        #         self.client.disconnect()
+        #     self.close()
+        # except Exception as e:
+        #     print(f"DISCONNECT: Exeption: {e}")
         print(f"DISCONNECTED : Close code {close_code}")
 
     
@@ -138,58 +165,65 @@ class TelegramScraper(AsyncWebsocketConsumer):
 
         if data["status"] == "":
             for group in data["group"]:
-                if group["name"] == "":
-                    self.send_failed_notif(event, "Group name must be provided")
-                    print("CHATS: Group name not provided")
-                    self.close()
-                    break
+                if group["status"] == "":
+                    if group["name"] == "":
+                        self.send_failed_notif(event, "Group name must be provided")
+                        print("CHATS: Group name not provided")
+                        self.close()
+                        break
 
-                if not await self.dialog_exists(group["name"]):
-                    self.send_failed_notif(event, "Invalid group/channel name")
-                    print(f"CHATS: '{group['name']}' is an invalid group/channel name")
-                    self.close()
-                    break
+                    if not await self.dialog_exists(group["name"]):
+                        self.send_failed_notif(event, "Invalid group/channel name")
+                        print(f"CHATS: '{group['name']}' is an invalid group/channel name")
+                        self.close()
+                        break
 
-                if self.logout:
-                    return
+                    if self.logout:
+                        return
 
-                print(f"CHATS: Sending users from {group}")
-                await self.send_success_notif(event, f"Sending messages for {group['name']}")
-                await self.send_group_chats(group["name"])
-                print(f"CHATS: Data sent for {group['name']}")
+                    print(f"CHATS: Sending users from {group}")
+                    await self.send_success_notif(event, f"Sending messages for {group['name']}")
+                    await self.send_group_chats(group["name"])
+                    print(f"CHATS: Data sent for {group['name']}")
 
-        if data["status"] == "latest":
-            for group in data["group"]:
-                if group["name"] == "":
-                    self.send_failed_notif(event, "Group name must be provided")
-                    print("CHATS: Group name not provided")
-                    self.close()
-                    break
+                if group["status"] == "latest":
+                    if group["name"] == "":
+                        self.send_failed_notif(event, "Group name must be provided")
+                        print("CHATS: Group name not provided")
+                        self.close()
+                        break
 
-                if not await self.dialog_exists(group["name"]):
-                    self.send_failed_notif(event, "Invalid group/channel name")
-                    print(f"CHATS: '{group['name']}' is an invalid group/channel name")
-                    self.close()
-                    break
+                    if not await self.dialog_exists(group["name"]):
+                        self.send_failed_notif(event, "Invalid group/channel name")
+                        print(f"CHATS: '{group['name']}' is an invalid group/channel name")
+                        self.close()
+                        break
 
-                if self.logout:
-                    return
+                    if self.logout:
+                        return
+                    
+                    # get from db
+                    telegram_user = await sync_to_async(Telegram.objects.using)('telegramdb')
+                    telegram_user = await sync_to_async(telegram_user.exclude)(group_name='')
+                    telegram_user = await sync_to_async(telegram_user.filter)(api_key=self.apiKey, group_name=group["name"])
+                    telegram_user = await sync_to_async(telegram_user.first)()
 
-                # get from db
-                telegram_user = Telegram.objects.using('telegramdb').filter(api_key=self.apiKey, group_name=group["name"])
-                message_id = telegram_user.message_id if telegram_user.message_id else 0
-                print("Telegram User message id : ",telegram_user.message_id)
-                print("Handler Min Id : ",message_id)
+                    message_id = telegram_user.message_id if telegram_user else 0
 
-                print(f"CHATS: Sending users from {group}")
-                await self.send_success_notif(event, f"Sending messages for {group['name']}")
-                await self.send_group_chats(group["name"], min_id=message_id)
-                print(f"CHATS: Data sent for {group['name']}")
+                    print(f"CHATS: Sending users from {group}")
+                    await self.send_success_notif(event, f"Sending messages for {group['name']}")
+                    await self.send_group_chats(group["name"], min_id=message_id)
+                    print(f"CHATS: Data sent for {group['name']}")
+                
+                else:
+                    await self.send_failed_notif(event, "invalid status")
+        else:
+            await self.send_failed_notif(event, "status should be empty string")
             
-    async def handle_logout(self, data):
+    async def handle_logout(self, event, data):
         if data["status"] == "disconnect":
             if not (self.verified or self.session_created):
-                await self.send_failed_notif("logout", "unauthorized")
+                await self.send_failed_notif(event, "unauthorized")
                 return
                 
             self.logout = True
@@ -315,14 +349,14 @@ class TelegramScraper(AsyncWebsocketConsumer):
             pass
         count = 0
         print("Min ID : ",min_id)
+        min_id = int(min_id)
         async for message in self.client.iter_messages(entity=group_entity, min_id=min_id, reverse=True):
             if not isinstance(message, types.Message) or message is None:
                 continue
             
             if self.logout:
                 return
-  
-            time.sleep(10)
+
             message_dict = await self.get_message_properties(message)
             print("Message ID : ",message_dict["id"])
             await self.send_success_notif("chats", {

@@ -1,3 +1,5 @@
+django
+asgi-redis
 channels==4.0.0
 daphne==4.0.0
 channels_redis==4.1.0
