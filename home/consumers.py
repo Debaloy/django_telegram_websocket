@@ -22,6 +22,10 @@ class TelegramScraper(AsyncWebsocketConsumer):
     session_created = False # whether session was created successfully or not or if it exists
     logout = False # whether the user requested to terminate the session or not
 
+    # keep track of how many groups are left to scrape
+    user_scraping_count = 0
+    chat_scraping_count = 0
+
     api_hash = "e1cf9289e44fa9ec964d4e110dff729e"
     api_id = "26122974"
 
@@ -142,6 +146,8 @@ class TelegramScraper(AsyncWebsocketConsumer):
             await self.send_failed_notif(event, "login required")
             await self.close()
 
+        self.user_scraping_count = len(data["group"])
+
         for group in data["group"]:
             if not await self.dialog_exists(group):
                 print(f"USERS: Group name '{group}' does not exist")
@@ -162,6 +168,8 @@ class TelegramScraper(AsyncWebsocketConsumer):
         if not self.session_created:
             await self.send_failed_notif(event, "login required")
             await self.close()
+
+        self.chat_scraping_count = len(data["group"])
 
         if data["status"] == "":
             for group in data["group"]:
@@ -352,6 +360,11 @@ class TelegramScraper(AsyncWebsocketConsumer):
             count += 1
         print(f"USERS: Data sent for group '{group_name}'")
         print("COUNT : ",count)
+        self.user_scraping_count -= 1
+
+        if self.user_scraping_count == 0:
+            await self.client.disconnect()
+            await self.close()
 
     async def send_group_chats(self, group_name, min_id=0):
         group_entity = await self.client.get_entity(group_name)
@@ -400,6 +413,12 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 pass
         print(f"CHATS: Data sent for {group_name}")
         print("Chats : ",count)
+
+        self.handle_chats_scraping_scraping_count -= 1
+
+        if self.chat_scraping_count == 0:
+            await self.client.disconnect()
+            await self.close()
 
 
     # ========== GROUP USERS UTILITY FUNCTIONS ==========
@@ -557,7 +576,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
             } if user.photo else None,
             "bot_info_version": user.bot_info_version if user.bot_info_version else None,
             "lang_code": user.lang_code if user.lang_code else None,
-            "usernames": json.dumps(user.usernames) if user.usernames else json.dumps([]),
+            "usernames": [username.to_dict() for username in user.usernames] if user.usernames else None,
             "restriction_reason": [reason.to_dict() for reason in user.restriction_reason] if user.restriction_reason else None,
             "access_hash": user.access_hash,
         }
