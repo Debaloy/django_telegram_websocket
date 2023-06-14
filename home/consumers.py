@@ -304,7 +304,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 'message_id': ''
             }
 
-            result = Telegram.objects.filter(api_key=self.apiKey)[0]
+            result = Telegram.objects.using('telegramdb').filter(api_key=self.apiKey)[0]
             if not result:
                 result = Telegram.objects.create(api_key=self.apiKey, defaults=defaults)
                 print("TELEGRAM LOGIN: Record was created")
