@@ -199,3 +199,73 @@ ws://localhost:8000/ws/telegram/
     }
 }
 ```
+
+# Chats
+### Request:
+- Get all the chats in a group/channel(s)
+```json
+{
+	"event": "chats",
+	"data": {
+		"group": [
+			{
+				"name": "UnderWorld4444",
+				"status": ""
+			}
+		],
+		"status": ""
+	}
+}
+```
+- Get all the latest chats in a group/channel(s) [latest from where you last left]
+```json
+{
+	"event": "chats",
+	"data": {
+		"group": [
+			{
+				"name": "UnderWorld4444",
+				"status": "latest"
+			}
+		],
+		"status": ""
+	}
+}
+```
+
+### Response(s):
+- if valid group/channel name provided:
+```json
+{
+    "event": "chats",
+    "data": {
+        "status": "success",
+        "message": "sending chats"
+    }
+}
+
+...Data will be sent in this formar:
+{
+    "event": "chats",
+    "data": {
+        "status": "success",
+        "message": {
+            "group": "group_name",
+            "chat": {
+                "id": "messageid",
+                ...
+            }
+        }
+    }
+}
+```
+- if invalid group/channel name provided: **(socket closed)**
+```json
+{
+    "event": "chats",
+    "data": {
+        "status": "failed",
+        "message": "invalid request"
+    }
+}
+```
