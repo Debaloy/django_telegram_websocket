@@ -4,5 +4,4 @@ channels==4.0.0
 daphne==4.0.0
 channels_redis==4.1.0
 telethon==1.27.0
-mysqlclient==2.1.1
 python-decouple==3.8

@@ -3,7 +3,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from telegram.models import Telegram
 from user.models import User
 from asgiref.sync import sync_to_async
-import time
+import os
 import json
 from datetime import datetime
 from telethon import TelegramClient, errors, types
@@ -81,6 +81,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
 
     async def websocket_disconnect(self, event):
         print("disconnected websocket")
+        self.logout = True
         # Remove client from the list of connected clients
         connected_clients.remove(self.channel_name)
         print(connected_clients)
@@ -155,8 +156,8 @@ class TelegramScraper(AsyncWebsocketConsumer):
 
             print(f"USERS: Sending users from {group}")
             await self.send_success_notif(event, "sending users")
-            await self.send_group_users(group)
-            print(f"USERS: Data sent for group '{group}'")
+            asyncio.create_task(self.send_group_users(group))
+            # print(f"USERS: Data sent for group '{group}'")
 
     async def handle_chats_scraping(self, event, data):
         if not self.session_created:
@@ -181,10 +182,16 @@ class TelegramScraper(AsyncWebsocketConsumer):
                     if self.logout:
                         return
 
-                    print(f"CHATS: Sending users from {group}")
-                    await self.send_success_notif(event, f"Sending messages for {group['name']}")
-                    await self.send_group_chats(group["name"])
-                    print(f"CHATS: Data sent for {group['name']}")
+                    try:
+                        print(f"CHATS: Sending users from {group}")
+                        await self.send_success_notif(event, f"Sending messages for {group['name']}")
+                        asyncio.create_task(self.send_group_chats(group["name"]))
+                        # print(f"CHATS: Data sent for {group['name']}")
+                    except Exception as e:
+                        print(f"CHATS: Exception occured for group {group}")
+                        print(e)
+                        print(f"CHATS: Restarting scraping for {group}")
+                        await self.handle_chats_scraping(event, data)
 
                 if group["status"] == "latest":
                     if group["name"] == "":
@@ -210,10 +217,16 @@ class TelegramScraper(AsyncWebsocketConsumer):
 
                     message_id = telegram_user.message_id if telegram_user else 0
 
-                    print(f"CHATS: Sending users from {group}")
-                    await self.send_success_notif(event, f"Sending messages for {group['name']}")
-                    await self.send_group_chats(group["name"], min_id=message_id)
-                    print(f"CHATS: Data sent for {group['name']}")
+                    try:
+                        print(f"CHATS: Sending users from {group}")
+                        await self.send_success_notif(event, f"Sending messages for {group['name']}")
+                        asyncio.create_task(self.send_group_chats(group["name"], min_id=message_id))
+                        print(f"CHATS: Data sent for {group['name']}")
+                    except Exception as e:
+                        print(f"CHATS: Exception occured for group {group}")
+                        print(e)
+                        print(f"CHATS: Restarting scraping for {group}")
+                        await self.handle_chats_scraping(event, data)
                 
                 else:
                     await self.send_failed_notif(event, "invalid status")
@@ -268,6 +281,13 @@ class TelegramScraper(AsyncWebsocketConsumer):
             print("TELEGRAM LOGIN: Invalid phone number provided.")
             await self.send_failed_notif("telegram login", "invalid phone number")
             await self.close()
+        except errors.rpcerrorlist.AuthKeyDuplicatedError:
+            print("TELEGRAM LOGIN: Duplicate Authorization Key")
+            await self.send_failed_notif("telegram login", "duplicate session detected, login again")
+            # Delete session file as the one currently cannot be used anymore (new session will need to be made)
+            await self.close()
+            await self.client.disconnect()
+            await sync_to_async(os.remove)(f"{phone[1:]}.session")
 
     async def validate_code(self, code):
         if self.logout:
@@ -321,6 +341,9 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 continue
 
             if self.logout:
+                print(f"USERS: Data Sent for {group_name}")
+                print(f"USERS: Total users sent: {count}")
+                print("USERS: Client Disconnected")
                 return
 
             user_dict = await self.get_user_properties(user)
@@ -330,6 +353,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 "user": user_dict
             })
             count += 1
+        print(f"USERS: Data sent for group '{group_name}'")
         print("COUNT : ",count)
 
     async def send_group_chats(self, group_name, min_id=0):
@@ -355,6 +379,10 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 continue
             
             if self.logout:
+                print(f"CHATS: Data Sent for {group_name}")
+                print(f"CHATS: Last Message ID Sent: {message.id}")
+                print(f"CHATS: Total messages sent: {count}")
+                print("CHATS: Client Disconnected")
                 return
 
             message_dict = await self.get_message_properties(message)
@@ -373,6 +401,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
             else:
                 # The record already exists
                 pass
+        print(f"CHATS: Data sent for {group_name}")
         print("Chats : ",count)
 
 

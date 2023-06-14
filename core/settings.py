@@ -12,7 +12,7 @@ https://docs.djangoproject.com/en/3.2/ref/settings/
 
 from pathlib import Path
 
-from decouple import config
+# from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -98,16 +98,16 @@ DATABASES = {
     'userdb': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'userdb',
-        'USER': config('DB_USER'),
-        'PASSWORD': config('DB_PASSWORD'),
+        'USER': 'root',
+        'PASSWORD': 'root',
         'HOST': '127.0.0.1',
         'PORT': '3306',
     },
     'telegramdb': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'telegramdb',
-        'USER': config('DB_USER'),
-        'PASSWORD': config('DB_PASSWORD'),
+        'USER': 'root',
+        'PASSWORD': 'root',
         'HOST': '127.0.0.1',
         'PORT': '3306',
     }
