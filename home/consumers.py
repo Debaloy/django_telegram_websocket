@@ -118,7 +118,6 @@ class TelegramScraper(AsyncWebsocketConsumer):
             print("TOKEN LOGIN: Unauthorized User")
             await self.send_failed_notif(event, "unauthorized")
             await self.close()
-            
 
     async def handle_telegram_login(self, event, data):
         print("TELEGRAM LOGIN: Creating session...")

@@ -12,7 +12,7 @@ https://docs.djangoproject.com/en/3.2/ref/settings/
 
 from pathlib import Path
 
-# from decouple import config
+from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -27,7 +27,7 @@ SECRET_KEY = 'django-insecure-)+t02k%a$i5d$9y(6+(b_t!=0f&-xfk7gj+sirban_m#$nl87-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -98,16 +98,16 @@ DATABASES = {
     'userdb': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'userdb',
-        'USER': 'root',
-        'PASSWORD': 'root',
+        'USER': config('DB_USER'),
+        'PASSWORD': config('DB_PASSWORD'),
         'HOST': '127.0.0.1',
         'PORT': '3306',
     },
     'telegramdb': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'telegramdb',
-        'USER': 'root',
-        'PASSWORD': 'root',
+        'USER': config('DB_USER'),
+        'PASSWORD': config('DB_PASSWORD'),
         'HOST': '127.0.0.1',
         'PORT': '3306',
     }
