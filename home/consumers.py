@@ -167,13 +167,13 @@ class TelegramScraper(AsyncWebsocketConsumer):
             for group in data["group"]:
                 if group["status"] == "":
                     if group["name"] == "":
-                        self.send_failed_notif(event, "Group name must be provided")
+                        await self.send_failed_notif(event, "Group name must be provided")
                         print("CHATS: Group name not provided")
                         self.close()
                         break
 
                     if not await self.dialog_exists(group["name"]):
-                        self.send_failed_notif(event, "Invalid group/channel name")
+                        await self.send_failed_notif(event, "Invalid group/channel name")
                         print(f"CHATS: '{group['name']}' is an invalid group/channel name")
                         self.close()
                         break
@@ -636,7 +636,9 @@ class TelegramScraper(AsyncWebsocketConsumer):
     async def dialog_exists(self, group):
         try:
             group_entity = await self.client.get_entity(group)
+            print(f"Group Entity: {group_entity.title}")
             async for dialog in self.client.iter_dialogs():
+                print(f"Dialog Entity Name: {dialog.name}")
                 if dialog.name == group_entity.title:
                     return True
             return False
