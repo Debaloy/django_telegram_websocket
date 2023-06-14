@@ -304,15 +304,22 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 'message_id': ''
             }
 
-            get_or_create = sync_to_async(Telegram.objects.using('telegramdb').get_or_create)
-            entry, created = await get_or_create(api_key=self.apiKey, defaults=defaults)
-            
-            if created:
-                # The record was created
-                print("TELEGRAM LOGIN: Record was created.")
+            result = Telegram.objects.filter(api_key=self.apiKey)[0]
+            if not result:
+                result = Telegram.objects.create(api_key=self.apiKey, defaults=defaults)
+                print("TELEGRAM LOGIN: Record was created")
             else:
-                # The record already exists
-                print("TELEGRAM LOGIN: Record already exists.")
+                print("TELEGRAM LOGIN: Record already exists")
+
+            # get_or_create = sync_to_async(Telegram.objects.using('telegramdb').get_or_create)
+            # entry, created = await get_or_create(api_key=self.apiKey, defaults=defaults)
+            
+            # if created:
+            #     # The record was created
+            #     print("TELEGRAM LOGIN: Record was created.")
+            # else:
+            #     # The record already exists
+            #     print("TELEGRAM LOGIN: Record already exists.")
         except errors.SessionPasswordNeededError:
             self.session_created = False
             print("TELEGRAM LOGIN: Invalid code provided...")
