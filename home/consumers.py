@@ -441,7 +441,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
         print(f"CHATS: Data sent for {group_name}")
         print("Chats : ",count)
 
-        self.handle_chats_scraping_scraping_count -= 1
+        self.chat_scraping_count -= 1
 
         if self.chat_scraping_count == 0:
             await self.client.disconnect()
