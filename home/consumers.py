@@ -284,9 +284,15 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 print("TELEGRAM LOGIN: User session available")
                 await self.send_success_notif("telegram login", "logged in")
                 self.session_created = True
-        except errors.PhoneCodeInvalidError:
-            print("TELEGRAM LOGIN: Invalid phone number provided.")
+        except errors.rpcerrorlist.PhoneNumberInvalidError:
+            print("TELEGRAM LOGIN: Invalid phone number provided")
             await self.send_failed_notif("telegram login", "invalid phone number")
+            await self.client.disconnect()
+            await self.close()
+        except (errors.rpcerrorlist.PhoneCodeInvalidError, errors.rpcerrorlist.PhoneCodeEmptyError, errors.rpcerrorlist.PhoneCodeInvalidError):
+            print("TELEGRAM LOGIN: Invalid verification code provided.")
+            await self.send_failed_notif("telegram login", "invalid verification code")
+            await self.client.disconnect()
             await self.close()
         except errors.rpcerrorlist.AuthKeyDuplicatedError:
             print("TELEGRAM LOGIN: Duplicate Authorization Key")
@@ -295,6 +301,19 @@ class TelegramScraper(AsyncWebsocketConsumer):
             await self.close()
             await self.client.disconnect()
             await sync_to_async(os.remove)(f"{phone[1:]}.session")
+        except errors.rpcerrorlist:
+            print("TELEGRAM LOGIN: RPCE ERROR")
+            await self.send_failed_notif("telegram login", "rpce error")
+            await self.client.disconnect()
+            await self.close()
+        except Exception as e:
+            print("TELEGRAM LOGIN: Some other exception occured")
+            print(e)
+            await self.send_failed_notif("telegram login", "Unknown Error")
+            await self.client.disconnect()
+            await self.close()
+
+
 
     async def validate_code(self, code):
         if self.logout:
@@ -319,11 +338,19 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 print("TELEGRAM LOGIN: Record was created")
             else:
                 print("TELEGRAM LOGIN: Record already exists")
-        except errors.SessionPasswordNeededError:
+        except (errors.SessionPasswordNeededError, errors.SendCodeUnavailableError, errors.PhoneCodeEmptyError, errors.PhoneCodeExpiredError, errors.PhoneCodeInvalidError):
             self.session_created = False
             print("TELEGRAM LOGIN: Invalid code provided...")
             await self.send_failed_notif("telegram login", "invalid code provided")
+            await self.client.disconnect()
             await self.close()
+        except Exception as e:
+            print("TELEGRAM LOGIN: Some other exception occured")
+            print(e)
+            await self.send_failed_notif("telegram login", "Unknown Error")
+            await self.client.disconnect()
+            await self.close()
+
 
     async def send_group_users(self, group_name):
         group_entity = await self.client.get_entity(group_name)
