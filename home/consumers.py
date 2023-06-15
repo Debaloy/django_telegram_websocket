@@ -202,7 +202,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
                         print(f"CHATS: Restarting scraping for {group}")
                         await self.handle_chats_scraping(event, data)
 
-                if group["status"] == "latest":
+                elif group["status"] == "latest":
                     if group["name"] == "":
                         await self.send_failed_notif(event, "Group name must be provided")
                         print("CHATS: Group name not provided")
@@ -357,7 +357,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
 
 
     async def send_group_users(self, group_name):
-        group_entity = await self.client.get_entity(group_name)
+        group_entity = await self.client.get_entity(await self.get_chat_id(group_name))
 
         api_calls = await sync_to_async(User.objects.using('userdb').get)(api_key=self.apiKey)
         api_calls = api_calls.api_calls
@@ -398,7 +398,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
             await self.close()
 
     async def send_group_chats(self, group_name, min_id=0):
-        group_entity = await self.client.get_entity(group_name)
+        group_entity = await self.client.get_entity(await self.get_chat_id(group_name))
 
         api_calls = await sync_to_async(User.objects.using('userdb').get)(api_key=self.apiKey)
         api_calls = api_calls.api_calls
@@ -673,15 +673,16 @@ class TelegramScraper(AsyncWebsocketConsumer):
             }
         }))
 
+    async def get_chat_id(self, group):
+        async for dialog in self.client.iter_dialogs():
+            if group.lower() in dialog.name.lower():
+                return int(dialog.id)
 
     async def dialog_exists(self, group):
         try:
-            group_entity = await self.client.get_entity(group)
             async for dialog in self.client.iter_dialogs():
-                if (
-                    dialog.name == group_entity.username.lower() or
-                    dialog.name == group_entity.title
-                ):
+                print(dialog.name)
+                if group.lower() in dialog.name.lower():
                     return True
             return False
         except (ValueError, AttributeError):
