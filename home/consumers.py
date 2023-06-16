@@ -137,6 +137,13 @@ class TelegramScraper(AsyncWebsocketConsumer):
         self.user_scraping_count = len(data["group"])
 
         for group in data["group"]:
+            if not group.strip():
+                print("USERS: Group not provided")
+                await self.send_failed_notif(event, "Group name not provided")
+                await self.client.disconnect()
+                await self.close()
+                break
+                        
             if not await self.dialog_exists(group):
                 print(f"USERS: Group name '{group}' does not exist")
                 await self.send_failed_notif(event, "invalid request")
@@ -147,10 +154,17 @@ class TelegramScraper(AsyncWebsocketConsumer):
             if self.logout:
                 return
 
-            print(f"USERS: Sending users from {group}")
-            await self.send_success_notif(event, "sending users")
-            asyncio.create_task(self.send_group_users(group))
-            # print(f"USERS: Data sent for group '{group}'")
+            
+            try:
+                print(f"USERS: Sending users from {group}")
+                await self.send_success_notif(event, f"sending users from {group}")
+                asyncio.create_task(self.send_group_users(group))
+            except Exception as e:
+                print(f"USERS: Exception occured for group {group}")
+                print(e)
+                print("USERS: Restarting scraping for all groups")
+                await self.send_failed_notif(event, "Unexpected error, resending for all groups.")
+                await self.handle_users_scraping(event, data)
 
     async def handle_chats_scraping(self, event, data):
         if not self.session_created:
@@ -162,7 +176,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
         if data["status"] == "":
             for group in data["group"]:
                 if group["status"] == "":
-                    if group["name"] == "":
+                    if not group["name"].strip():
                         await self.send_failed_notif(event, "Group name must be provided")
                         print("CHATS: Group name not provided")
                         await self.client.disconnect()
@@ -183,15 +197,15 @@ class TelegramScraper(AsyncWebsocketConsumer):
                         print(f"CHATS: Sending users from {group}")
                         await self.send_success_notif(event, f"Sending messages for {group['name']}")
                         asyncio.create_task(self.send_group_chats(group["name"]))
-                        # print(f"CHATS: Data sent for {group['name']}")
                     except Exception as e:
                         print(f"CHATS: Exception occured for group {group}")
                         print(e)
                         print(f"CHATS: Restarting scraping for {group}")
+                        await self.send_failed_notif(event, "Unexpected error, resending.")
                         await self.handle_chats_scraping(event, data)
 
                 elif group["status"] == "latest":
-                    if group["name"] == "":
+                    if not group["name"].strip():
                         await self.send_failed_notif(event, "Group name must be provided")
                         print("CHATS: Group name not provided")
                         await self.client.disconnect()
@@ -208,10 +222,13 @@ class TelegramScraper(AsyncWebsocketConsumer):
                     if self.logout:
                         return
                     
+                    group_entity = await self.client.get_entity(await self.get_chat_id(group["name"]).strip())
+                    group_id = str(group_entity.id)
+                    
                     # get from db
                     telegram_user = await sync_to_async(Telegram.objects.using)('telegramdb')
                     telegram_user = await sync_to_async(telegram_user.exclude)(group_name='')
-                    telegram_user = await sync_to_async(telegram_user.filter)(api_key=self.apiKey, group_name=group["name"])
+                    telegram_user = await sync_to_async(telegram_user.filter)(api_key=self.apiKey, group_name=group_id)
                     telegram_user = await sync_to_async(telegram_user.first)()
 
                     message_id = telegram_user.message_id if telegram_user else 0
@@ -224,7 +241,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
                     except Exception as e:
                         print(f"CHATS: Exception occured for group {group}")
                         print(e)
-                        print(f"CHATS: Restarting scraping for {group}")
+                        print("CHATS: Restarting scraping for all groups")
                         await self.handle_chats_scraping(event, data)
                 
                 else:
@@ -305,8 +322,6 @@ class TelegramScraper(AsyncWebsocketConsumer):
             await self.client.disconnect()
             await self.close()
 
-
-
     async def validate_code(self, code):
         if self.logout:
             return
@@ -343,8 +358,8 @@ class TelegramScraper(AsyncWebsocketConsumer):
             await self.client.disconnect()
             await self.close()
 
-
     async def send_group_users(self, group_name):
+        group_name = group_name.strip()
         group_entity = await self.client.get_entity(await self.get_chat_id(group_name))
 
         api_calls = await sync_to_async(User.objects.using('userdb').get)(api_key=self.apiKey)
@@ -386,6 +401,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
             await self.close()
 
     async def send_group_chats(self, group_name, min_id=0):
+        group_name = group_name.strip()
         group_entity = await self.client.get_entity(await self.get_chat_id(group_name))
 
         api_calls = await sync_to_async(User.objects.using('userdb').get)(api_key=self.apiKey)
@@ -422,7 +438,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
             })
             count += 1
             update_or_create = sync_to_async(Telegram.objects.using('telegramdb').update_or_create)
-            entry, created = await update_or_create(api_key=self.apiKey, group_name=group_name, defaults={'message_id': message_dict["id"]})
+            entry, created = await update_or_create(api_key=self.apiKey, group_name=str(group_entity.id), defaults={'message_id': message_dict["id"]})
             
             if created:
                 # The record was created
@@ -669,7 +685,6 @@ class TelegramScraper(AsyncWebsocketConsumer):
     async def dialog_exists(self, group):
         try:
             async for dialog in self.client.iter_dialogs():
-                print(dialog.name)
                 if group.lower() in dialog.name.lower():
                     return True
             return False
