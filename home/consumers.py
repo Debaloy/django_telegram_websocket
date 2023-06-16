@@ -374,31 +374,44 @@ class TelegramScraper(AsyncWebsocketConsumer):
         else:
             # The record already exists
             pass
-        count = 0
-        async for user in self.client.iter_participants(group_entity):
-            if not isinstance(user, types.User) or user is None:
-                continue
 
-            if self.logout:
-                print(f"USERS: Data Sent for {group_name}")
-                print(f"USERS: Total users sent: {count}")
-                print("USERS: Client Disconnected")
-                return
+        try:
+            count = 0
+            async for user in self.client.iter_participants(group_entity):
+                if not isinstance(user, types.User) or user is None:
+                    continue
 
-            user_dict = await self.get_user_properties(user)
-            
-            await self.send_success_notif("users", {
-                "group": group_name,
-                "user": user_dict
-            })
-            count += 1
-        print(f"USERS: Data sent for group '{group_name}'")
-        print("COUNT : ",count)
-        self.user_scraping_count -= 1
+                if self.logout:
+                    print(f"USERS: Data Sent for {group_name}")
+                    print(f"USERS: Total users sent: {count}")
+                    print("USERS: Client Disconnected")
+                    return
 
-        if self.user_scraping_count == 0:
+                user_dict = await self.get_user_properties(user)
+                
+                await self.send_success_notif("users", {
+                    "group": group_name,
+                    "user": user_dict
+                })
+                count += 1
+            print(f"USERS: Data sent for group '{group_name}'")
+            print("COUNT : ",count)
+            self.user_scraping_count -= 1
+
+            if self.user_scraping_count == 0:
+                await self.client.disconnect()
+                await self.close()
+        except errors.ChatAdminRequiredError:
+            print(f"USERS: Admin privilege required to get users for {group_name}")
+            await self.send_failed_notif("users", f"Admin privilege required for {group_name}")
             await self.client.disconnect()
             await self.close()
+        except Exception as e:
+            print("USERS: Unknown Exception: ", e)
+            await self.send_failed_notif("users", "Unexpected error")
+            await self.client.disconnect()
+            await self.close()
+            
 
     async def send_group_chats(self, group_name, min_id=0):
         group_name = group_name.strip()
@@ -416,42 +429,53 @@ class TelegramScraper(AsyncWebsocketConsumer):
         else:
             # The record already exists
             pass
-        count = 0
-        print("Min ID : ",min_id)
-        min_id = int(min_id)
-        async for message in self.client.iter_messages(entity=group_entity, min_id=min_id, reverse=True):
-            if not isinstance(message, types.Message) or message is None:
-                continue
-            
-            if self.logout:
-                print(f"CHATS: Data Sent for {group_name}")
-                print(f"CHATS: Last Message ID Sent: {message.id}")
-                print(f"CHATS: Total messages sent: {count}")
-                print("CHATS: Client Disconnected")
-                return
+        try:
+            count = 0
+            print("Min ID : ",min_id)
+            min_id = int(min_id)
+            async for message in self.client.iter_messages(entity=group_entity, min_id=min_id, reverse=True):
+                if not isinstance(message, types.Message) or message is None:
+                    continue
+                
+                if self.logout:
+                    print(f"CHATS: Data Sent for {group_name}")
+                    print(f"CHATS: Last Message ID Sent: {message.id}")
+                    print(f"CHATS: Total messages sent: {count}")
+                    print("CHATS: Client Disconnected")
+                    return
 
-            message_dict = await self.get_message_properties(message)
-            print("Message ID : ",message_dict["id"])
-            await self.send_success_notif("chats", {
-                "group": group_name,
-                "chat": message_dict
-            })
-            count += 1
-            update_or_create = sync_to_async(Telegram.objects.using('telegramdb').update_or_create)
-            entry, created = await update_or_create(api_key=self.apiKey, group_name=str(group_entity.id), defaults={'message_id': message_dict["id"]})
-            
-            if created:
-                # The record was created
-                pass
-            else:
-                # The record already exists
-                pass
-        print(f"CHATS: Data sent for {group_name}")
-        print("Chats : ",count)
+                message_dict = await self.get_message_properties(message)
+                print("Message ID : ",message_dict["id"])
+                await self.send_success_notif("chats", {
+                    "group": group_name,
+                    "chat": message_dict
+                })
+                count += 1
+                update_or_create = sync_to_async(Telegram.objects.using('telegramdb').update_or_create)
+                entry, created = await update_or_create(api_key=self.apiKey, group_name=str(group_entity.id), defaults={'message_id': message_dict["id"]})
+                
+                if created:
+                    # The record was created
+                    pass
+                else:
+                    # The record already exists
+                    pass
+            print(f"CHATS: Data sent for {group_name}")
+            print("Chats : ",count)
 
-        self.chat_scraping_count -= 1
+            self.chat_scraping_count -= 1
 
-        if self.chat_scraping_count == 0:
+            if self.chat_scraping_count == 0:
+                await self.client.disconnect()
+                await self.close()
+        except errors.ChatAdminRequiredError:
+            print(f"CHATS: Admin privilege required to get users for {group_name}")
+            await self.send_failed_notif("chats", f"Admin privilege required for {group_name}")
+            await self.client.disconnect()
+            await self.close()
+        except Exception as e:
+            print("CHATS: Unknown Exception: ", e)
+            await self.send_failed_notif("chats", "Unexpected error")
             await self.client.disconnect()
             await self.close()
 
