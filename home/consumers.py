@@ -41,15 +41,6 @@ class TelegramScraper(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({
             'status': 'connected'
         }))
-
-    # async def connect(self):
-    #     await(self.channel_layer.group_add)(
-    #         self.room_name, self.room_group_name
-    #     )
-    #     await self.accept()
-    #     await self.send(text_data=json.dumps({
-    #         "status": "connected"
-    #     }))
     
     async def receive(self, text_data):
         try:
@@ -82,27 +73,24 @@ class TelegramScraper(AsyncWebsocketConsumer):
         except json.JSONDecodeError as e:
             await self.send_failed_notif("JSON parsing error", f"Error: {e}")
             await self.close()
+        except Exception as e:
+            print("RECEIVE: Unknown exception: ", e)
+            await self.send_failed_notif("Error", "Unknown Error")
+            await self.close()
 
     async def websocket_disconnect(self, event):
-        print("disconnected websocket")
         self.logout = True
+        print("DISCONNECTED : CLIENT REMOVED: ", self.channel_name)
         # Remove client from the list of connected clients
         connected_clients.remove(self.channel_name)
-        print(connected_clients)
-        # If no clients are connected, stop the consumer after 10 seconds
-        if not connected_clients:
+        # Disconnect Telegram Client and close WebSocket Connection
+        if self.channel_name not in connected_clients:
             if self.session_created:
                 self.client.disconnect()
             self.close()
         await super().websocket_disconnect(event)
     
     async def disconnect(self, close_code):
-        # try:
-        #     if self.session_created:
-        #         self.client.disconnect()
-        #     self.close()
-        # except Exception as e:
-        #     print(f"DISCONNECT: Exeption: {e}")
         print(f"DISCONNECTED : Close code {close_code}")
 
     
