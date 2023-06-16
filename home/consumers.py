@@ -93,7 +93,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         print(f"DISCONNECTED : Close code {close_code}")
 
-    
+
     # ========== RECIEVE FUNCTIONS ==========
     async def handle_token_login(self, event, apiKey):
         print("TOKEN LOGIN: Verifying apikey...")
@@ -137,24 +137,11 @@ class TelegramScraper(AsyncWebsocketConsumer):
         self.user_scraping_count = len(data["group"])
 
         for group in data["group"]:
-            if not group.strip():
-                print("USERS: Group not provided")
-                await self.send_failed_notif(event, "Group name not provided")
-                await self.client.disconnect()
-                await self.close()
-                break
-                        
-            if not await self.dialog_exists(group):
-                print(f"USERS: Group name '{group}' does not exist")
-                await self.send_failed_notif(event, "invalid request")
-                await self.client.disconnect()
-                await self.close()
-                break
+            await self.group_name_validity(event, group)
 
             if self.logout:
                 return
 
-            
             try:
                 print(f"USERS: Sending users from {group}")
                 await self.send_success_notif(event, f"sending users from {group}")
@@ -175,24 +162,12 @@ class TelegramScraper(AsyncWebsocketConsumer):
 
         if data["status"] == "":
             for group in data["group"]:
+                await self.group_name_validity(event, group)
+                
+                if self.logout:
+                    return
+                
                 if group["status"] == "":
-                    if not group["name"].strip():
-                        await self.send_failed_notif(event, "Group name must be provided")
-                        print("CHATS: Group name not provided")
-                        await self.client.disconnect()
-                        await self.close()
-                        break
-
-                    if not await self.dialog_exists(group["name"]):
-                        await self.send_failed_notif(event, "Invalid group/channel name")
-                        print(f"CHATS: '{group['name']}' is an invalid group/channel name")
-                        await self.client.disconnect()
-                        await self.close()
-                        break
-
-                    if self.logout:
-                        return
-
                     try:
                         print(f"CHATS: Sending users from {group}")
                         await self.send_success_notif(event, f"Sending messages for {group['name']}")
@@ -205,24 +180,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
                         await self.handle_chats_scraping(event, data)
 
                 elif group["status"] == "latest":
-                    if not group["name"].strip():
-                        await self.send_failed_notif(event, "Group name must be provided")
-                        print("CHATS: Group name not provided")
-                        await self.client.disconnect()
-                        await self.close()
-                        break
-
-                    if not await self.dialog_exists(group["name"]):
-                        await self.send_failed_notif(event, "Invalid group/channel name")
-                        print(f"CHATS: '{group['name']}' is an invalid group/channel name")
-                        await self.client.disconnect()
-                        await self.close()
-                        break
-
-                    if self.logout:
-                        return
-                    
-                    group_entity = await self.client.get_entity(await self.get_chat_id(group["name"]).strip())
+                    group_entity = await self.client.get_entity(await self.get_chat_id(group["name"].strip()))
                     group_id = str(group_entity.id)
                     
                     # get from db
@@ -382,9 +340,11 @@ class TelegramScraper(AsyncWebsocketConsumer):
                     continue
 
                 if self.logout:
+                    print("=====================================")
                     print(f"USERS: Data Sent for {group_name}")
                     print(f"USERS: Total users sent: {count}")
                     print("USERS: Client Disconnected")
+                    print("=====================================")
                     return
 
                 user_dict = await self.get_user_properties(user)
@@ -396,6 +356,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 count += 1
             print(f"USERS: Data sent for group '{group_name}'")
             print("COUNT : ",count)
+            await self.send_success_notif("users", f"All users sent from {group_name}")
             self.user_scraping_count -= 1
 
             if self.user_scraping_count == 0:
@@ -403,7 +364,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 await self.close()
         except errors.ChatAdminRequiredError:
             print(f"USERS: Admin privilege required to get users for {group_name}")
-            await self.send_failed_notif("users", f"Admin privilege required for {group_name}")
+            await self.send_failed_notif("users", f"Admin privilege required for {group_name}. Connection terminated.")
             await self.client.disconnect()
             await self.close()
         except Exception as e:
@@ -411,7 +372,6 @@ class TelegramScraper(AsyncWebsocketConsumer):
             await self.send_failed_notif("users", "Unexpected error")
             await self.client.disconnect()
             await self.close()
-            
 
     async def send_group_chats(self, group_name, min_id=0):
         group_name = group_name.strip()
@@ -431,21 +391,21 @@ class TelegramScraper(AsyncWebsocketConsumer):
             pass
         try:
             count = 0
-            print("Min ID : ",min_id)
             min_id = int(min_id)
             async for message in self.client.iter_messages(entity=group_entity, min_id=min_id, reverse=True):
                 if not isinstance(message, types.Message) or message is None:
                     continue
                 
                 if self.logout:
+                    print("=====================================")
                     print(f"CHATS: Data Sent for {group_name}")
                     print(f"CHATS: Last Message ID Sent: {message.id}")
                     print(f"CHATS: Total messages sent: {count}")
                     print("CHATS: Client Disconnected")
+                    print("=====================================")
                     return
 
                 message_dict = await self.get_message_properties(message)
-                print("Message ID : ",message_dict["id"])
                 await self.send_success_notif("chats", {
                     "group": group_name,
                     "chat": message_dict
@@ -462,7 +422,7 @@ class TelegramScraper(AsyncWebsocketConsumer):
                     pass
             print(f"CHATS: Data sent for {group_name}")
             print("Chats : ",count)
-
+            await self.send_success_notif("chats", f"All chats sent from {group_name}")
             self.chat_scraping_count -= 1
 
             if self.chat_scraping_count == 0:
@@ -725,3 +685,20 @@ class TelegramScraper(AsyncWebsocketConsumer):
             #     return False
         except (ValueError, AttributeError):
             return False
+
+    async def group_name_validity(self, event, group_name):
+        group = group_name
+        if type(group_name) is dict:
+            group = group_name["name"]
+        
+        if not group.strip():
+            await self.send_failed_notif(event, "Group name must be provided")
+            print(f"{event.upper()}: Group name not provided")
+            await self.client.disconnect()
+            await self.close()
+
+        if not await self.dialog_exists(group):
+            await self.send_failed_notif(event, "Invalid group/channel name")
+            print(f"{event.upper()}: '{group}' is an invalid group/channel name")
+            await self.client.disconnect()
+            await self.close()
