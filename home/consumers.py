@@ -169,8 +169,8 @@ class TelegramScraper(AsyncWebsocketConsumer):
                 
                 if group["status"] == "":
                     try:
-                        print(f"CHATS: Sending users from {group}")
-                        await self.send_success_notif(event, f"Sending messages for {group['name']}")
+                        print(f"CHATS: Sending chats from {group}")
+                        await self.send_success_notif(event, f"sending chats from {group['name']}")
                         asyncio.create_task(self.send_group_chats(group["name"]))
                     except Exception as e:
                         print(f"CHATS: Exception occured for group {group}")
@@ -192,8 +192,8 @@ class TelegramScraper(AsyncWebsocketConsumer):
                     message_id = telegram_user.message_id if telegram_user else 0
 
                     try:
-                        print(f"CHATS: Sending users from {group}")
-                        await self.send_success_notif(event, f"Sending messages for {group['name']}")
+                        print(f"CHATS: Sending chats from {group}")
+                        await self.send_success_notif(event, f"sending chats from {group['name']}")
                         asyncio.create_task(self.send_group_chats(group["name"], min_id=message_id))
                         print(f"CHATS: Data sent for {group['name']}")
                     except Exception as e:
